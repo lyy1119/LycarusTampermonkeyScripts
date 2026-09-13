@@ -1,0 +1,108 @@
+name: Update README
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Update README
+        shell: python
+        run: |
+          import re
+          from pathlib import Path
+
+          repo = "${{ github.repository }}"
+          branch = "${{ github.ref_name }}"
+
+          files = sorted(Path(".").glob("*.user.js"))
+
+          items = []
+
+          for file in files:
+              text = file.read_text(encoding="utf-8")
+
+              def get_meta(name):
+                  m = re.search(
+                      rf"^//\s*@{name}\s+(.+)$",
+                      text,
+                      re.MULTILINE
+                  )
+                  return m.group(1).strip() if m else ""
+
+              name = get_meta("name") or file.stem
+              version = get_meta("version")
+              description = get_meta("description")
+
+              url = (
+                  f"https://raw.githubusercontent.com/"
+                  f"{repo}/{branch}/{file.name}"
+              )
+
+              item = f"### {name}\n\n"
+
+              if description:
+                  item += f"{description}\n\n"
+
+              if version:
+                  item += f"**版本：** `{version}`\n\n"
+
+              item += f"[一键安装]({url})\n"
+
+              items.append(item)
+
+          generated = "\n".join(items)
+
+          readme = Path("README.md")
+          text = readme.read_text(encoding="utf-8")
+
+          pattern = (
+              r"(<!-- AUTO-GENERATED:INSTALL:START -->)"
+              r".*?"
+              r"(<!-- AUTO-GENERATED:INSTALL:END -->)"
+          )
+
+          replacement = (
+              r"\1\n\n"
+              + generated
+              + "\n\n"
+              + r"\2"
+          )
+
+          new_text, count = re.subn(
+              pattern,
+              replacement,
+              text,
+              flags=re.DOTALL
+          )
+
+          if count != 1:
+              raise RuntimeError(
+                  "README 中没有找到唯一的自动生成区域"
+              )
+
+          readme.write_text(new_text, encoding="utf-8")
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add README.md
+
+          if git diff --cached --quiet; then
+            echo "README 没有变化"
+          else
+            git commit -m "docs: update install links"
+            git push
+          fi
